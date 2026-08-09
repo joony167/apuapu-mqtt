@@ -25,12 +25,19 @@
 
 const unsigned long PUBLISH_INTERVAL_MS = 2000;
 
+// 유언(LWT)은 브로커가 옛 연결이 죽은 걸 알아챈 뒤에야 나간다. 보드가 빨리
+// 재부팅하면 새 online 을 먼저 쓰고, 뒤늦게 도착한 offline 이 그걸 덮어쓴다.
+// 살아있는 보드가 계속 offline 으로 보이는 이유가 이것이다. 주기적으로 다시
+// 알려서 스스로 회복하게 한다.
+const unsigned long STATUS_REPUBLISH_MS = 15000;
+
 WiFiClient wifiClient;
 PubSubClient mqtt(wifiClient);
 
 String deviceId;
 String topicLedSet, topicLedState, topicSensor, topicStatus, topicMsg;
 unsigned long lastPublish = 0;
+unsigned long lastStatusMs = 0;
 
 // 시리얼 모니터 입력을 모으는 버퍼
 const unsigned long SERIAL_IDLE_MS = 100;   // 줄바꿈을 안 보내는 모니터도 있다
@@ -290,5 +297,10 @@ void loop() {
   if (now - lastPublish >= PUBLISH_INTERVAL_MS) {
     lastPublish = now;
     publishSensor();
+  }
+
+  if (now - lastStatusMs >= STATUS_REPUBLISH_MS) {
+    lastStatusMs = now;
+    mqtt.publish(topicStatus.c_str(), "online", true);
   }
 }
