@@ -10,3 +10,6 @@ build/
 # OS
 .DS_Store
 Thumbs.db
+
+# 메시 노드 자격증명
+mesh_secrets.h

@@ -4,6 +4,10 @@
 //   발행  apuapu/nodes/<id>/led/state    "on" | "off"            (retained)
 //   발행  apuapu/nodes/<id>/sensor/a0    {"raw":2048,"mv":1650}  2초마다
 //   발행  apuapu/nodes/<id>/status       "online" | "offline"    (retained, LWT)
+//   발행  apuapu/nodes/<id>/msg          시리얼 모니터에 친 문장 그대로
+//
+// 시리얼 모니터(115200)에 문장을 치고 엔터를 누르면 msg 토픽으로 나가고,
+// 대시보드의 메시지 기록에 쌓인다.
 //
 // <id>는 arduino_secrets.h의 DEVICE_NAME이다. 비워두면 MAC 뒤 3바이트를 붙인
 // "c6-xxxxxx"로 대체되므로, 설정을 안 해도 겹치지 않는 토픽을 갖는다.
@@ -25,8 +29,13 @@ WiFiClient wifiClient;
 PubSubClient mqtt(wifiClient);
 
 String deviceId;
-String topicLedSet, topicLedState, topicSensor, topicStatus;
+String topicLedSet, topicLedState, topicSensor, topicStatus, topicMsg;
 unsigned long lastPublish = 0;
+
+// 시리얼 모니터 입력을 모으는 버퍼
+const unsigned long SERIAL_IDLE_MS = 100;   // 줄바꿈을 안 보내는 모니터도 있다
+String serialBuf = "";
+unsigned long lastSerialCharMs = 0;
 
 // ---------------------------------------------------------------- helpers
 
@@ -186,6 +195,34 @@ void connectMqtt() {
   }
 }
 
+// 시리얼 모니터에 친 문장을 그대로 msg 토픽으로 보낸다.
+void flushSerialLine() {
+  serialBuf.trim();
+  if (serialBuf.length() == 0) {   // \r\n 의 두 번째 문자 등
+    serialBuf = "";
+    return;
+  }
+  mqtt.publish(topicMsg.c_str(), serialBuf.c_str());
+  Serial.printf("TX %s = %s\n", topicMsg.c_str(), serialBuf.c_str());
+  serialBuf = "";
+}
+
+void pollSerial() {
+  while (Serial.available()) {
+    char c = Serial.read();
+    lastSerialCharMs = millis();
+    if (c == '\n' || c == '\r') {
+      flushSerialLine();
+    } else if (serialBuf.length() < 120) {
+      serialBuf += c;
+    }
+  }
+  // 줄바꿈을 안 붙이는 시리얼 모니터도 있어서, 입력이 끊기면 한 줄로 본다.
+  if (serialBuf.length() > 0 && millis() - lastSerialCharMs > SERIAL_IDLE_MS) {
+    flushSerialLine();
+  }
+}
+
 void publishSensor() {
   int raw = analogRead(A0_PIN);
   int mv  = analogReadMilliVolts(A0_PIN);
@@ -221,6 +258,7 @@ void setup() {
   topicLedState = base + "/led/state";
   topicSensor   = base + "/sensor/a0";
   topicStatus   = base + "/status";
+  topicMsg      = base + "/msg";
 
   Serial.printf("\n=== 어푸어푸 MQTT node ===\ndevice id: %s\n", deviceId.c_str());
   Serial.printf("led set:   %s\n", topicLedSet.c_str());
@@ -246,6 +284,7 @@ void loop() {
   }
 
   mqtt.loop();
+  pollSerial();
 
   unsigned long now = millis();
   if (now - lastPublish >= PUBLISH_INTERVAL_MS) {
