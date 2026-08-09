@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>어푸어푸 MQTT 대시보드</title>
+<script src="./mqtt.min.js"></script>
+<style>
+  :root {
+    --bg: #0f1115;
+    --card: #181b22;
+    --card2: #1f2430;
+    --line: #2a2f3a;
+    --text: #e8eaed;
+    --muted: #9aa3b2;
+    --on: #e8a33d;
+    --off: #4a5160;
+    --ok: #3fb950;
+    --bad: #f85149;
+    --accent: #4d9fff;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 24px 20px 48px;
+    background: var(--bg); color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  header { max-width: 1100px; margin: 0 auto 20px; }
+  h1 { font-size: 1.4rem; margin: 0 0 4px; }
+  .sub { color: var(--muted); font-size: .85rem; margin-bottom: 16px; }
+  .bar {
+    display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+    background: var(--card); border: 1px solid var(--line);
+    border-radius: 10px; padding: 10px 12px;
+  }
+  .bar label { color: var(--muted); font-size: .85rem; }
+  input[type=text] {
+    background: var(--card2); border: 1px solid var(--line); color: var(--text);
+    border-radius: 6px; padding: 7px 10px; font-size: .9rem; width: 150px;
+    font-family: ui-monospace, Consolas, monospace;
+  }
+  button {
+    background: var(--card2); border: 1px solid var(--line); color: var(--text);
+    border-radius: 6px; padding: 7px 14px; font-size: .9rem; cursor: pointer;
+    font-weight: 600;
+  }
+  button:hover { border-color: var(--accent); }
+  .dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+  .dot.up { background: var(--ok); }
+  .dot.down { background: var(--bad); }
+  #connState { font-size: .85rem; color: var(--muted); margin-left: auto; display: flex; gap: 7px; align-items: center; }
+
+  main {
+    max-width: 1100px; margin: 20px auto 0;
+    display: grid; gap: 14px;
+    grid-template-columns: repeat(auto-fill, minmax(310px, 1fr));
+  }
+  .card {
+    background: var(--card); border: 1px solid var(--line);
+    border-radius: 12px; padding: 16px;
+  }
+  .card.offline { opacity: .5; }
+  .card-head { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+  .name { font-weight: 700; font-size: 1.05rem; }
+  .badge {
+    margin-left: auto; font-size: .7rem; font-weight: 700; letter-spacing: .04em;
+    padding: 3px 8px; border-radius: 20px; background: var(--off); color: #cfd4dd;
+  }
+  .badge.online { background: rgba(63,185,80,.16); color: var(--ok); }
+  .badge.offline { background: rgba(248,81,73,.14); color: var(--bad); }
+
+  .row { display: flex; align-items: baseline; gap: 10px; margin-bottom: 10px; }
+  .val { font-size: 1.9rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .unit { color: var(--muted); font-size: .85rem; }
+  .raw { color: var(--muted); font-size: .8rem; margin-left: auto; font-variant-numeric: tabular-nums; }
+
+  canvas { width: 100%; height: 56px; display: block; margin-bottom: 12px; }
+
+  .led-row { display: flex; align-items: center; gap: 8px; }
+  .led-state {
+    font-weight: 700; font-size: .85rem; padding: 4px 10px; border-radius: 6px;
+    background: var(--off); color: #cfd4dd; min-width: 54px; text-align: center;
+  }
+  .led-state.on { background: rgba(232,163,61,.18); color: var(--on); }
+  .led-row button { flex: 1; padding: 8px 0; }
+  .seen { color: var(--muted); font-size: .72rem; margin-top: 10px; }
+
+  .empty {
+    max-width: 1100px; margin: 40px auto; text-align: center;
+    color: var(--muted); font-size: .95rem; line-height: 1.7;
+  }
+  code { background: var(--card2); padding: 2px 6px; border-radius: 4px; font-size: .85em; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>어푸어푸 MQTT 대시보드</h1>
+  <div class="sub">토픽 <code>apuapu/nodes/&lt;이름&gt;/…</code> · WebSocket 포트 9001</div>
+  <div class="bar">
+    <label for="host">브로커</label>
+    <input type="text" id="host" spellcheck="false">
+    <button id="reconnect">접속</button>
+    <div id="connState"><span class="dot down"></span><span id="connText">연결 안 됨</span></div>
+  </div>
+</header>
+
+<main id="grid"></main>
+<div class="empty" id="empty">
+  아직 들어온 보드가 없습니다.<br>
+  보드에 전원을 넣고 <code>arduino_secrets.h</code>의 <code>MQTT_HOST</code>가 위 브로커 주소와 같은지 확인하세요.
+</div>
+
+<script>
+const BASE = 'apuapu/nodes';
+const WS_PORT = 9001;
+const HISTORY_MS = 60000;        // 그래프에 남기는 시간 범위
+const OFFLINE_AFTER_MS = 8000;   // 이 시간 동안 소식 없으면 흐리게 표시
+
+const params = new URLSearchParams(location.search);
+const savedHost = params.get('host') || localStorage.getItem('apuapu-host') || '192.168.0.31';
+
+const hostInput = document.getElementById('host');
+const grid = document.getElementById('grid');
+const empty = document.getElementById('empty');
+const connDot = document.querySelector('#connState .dot');
+const connText = document.getElementById('connText');
+hostInput.value = savedHost;
+
+let client = null;
+const nodes = new Map();   // id -> { status, led, raw, mv, history[], lastSeen, el }
+
+// ------------------------------------------------------------- 접속
+
+function connect(host) {
+  if (client) { try { client.end(true); } catch (e) {} }
+
+  localStorage.setItem('apuapu-host', host);
+  setConn(false, host + ':' + WS_PORT + ' 연결 중…');
+
+  client = mqtt.connect('ws://' + host + ':' + WS_PORT, {
+    reconnectPeriod: 3000,
+    connectTimeout: 5000,
+  });
+
+  client.on('connect', () => {
+    setConn(true, host + ':' + WS_PORT);
+    // retained 메시지 덕분에 구독하자마자 현재 상태가 바로 들어온다.
+    client.subscribe(BASE + '/+/status');
+    client.subscribe(BASE + '/+/led/state');
+    client.subscribe(BASE + '/+/sensor/a0');
+  });
+
+  client.on('reconnect', () => setConn(false, '재접속 시도 중…'));
+  client.on('error', (e) => setConn(false, '오류: ' + e.message));
+  client.on('close',  () => setConn(false, '연결 끊김'));
+  client.on('message', onMessage);
+}
+
+function setConn(ok, text) {
+  connDot.className = 'dot ' + (ok ? 'up' : 'down');
+  connText.textContent = text;
+}
+
+// ------------------------------------------------------------- 메시지 처리
+
+function onMessage(topic, payload) {
+  // apuapu/nodes/<id>/... 에서 <id>를 꺼낸다
+  const parts = topic.split('/');
+  if (parts.length < 4) return;
+  const id = parts[2];
+  const kind = parts.slice(3).join('/');
+  const msg = payload.toString();
+
+  const n = getNode(id);
+  n.lastSeen = Date.now();
+
+  if (kind === 'status') {
+    n.status = msg;
+  } else if (kind === 'led/state') {
+    n.led = msg;
+  } else if (kind === 'sensor/a0') {
+    try {
+      const d = JSON.parse(msg);
+      n.raw = d.raw;
+      n.mv = d.mv;
+      n.history.push({ t: Date.now(), mv: d.mv });
+      const cutoff = Date.now() - HISTORY_MS;
+      while (n.history.length && n.history[0].t < cutoff) n.history.shift();
+    } catch (e) { /* JSON이 아니면 무시 */ }
+  }
+
+  render(n);
+}
+
+function getNode(id) {
+  let n = nodes.get(id);
+  if (!n) {
+    n = { id, status: '?', led: '?', raw: null, mv: null, history: [], lastSeen: 0, el: null };
+    n.el = buildCard(n);
+    nodes.set(id, n);
+    // 이름순으로 자리 잡게 다시 붙인다
+    [...nodes.keys()].sort().forEach(k => grid.appendChild(nodes.get(k).el));
+    empty.style.display = 'none';
+  }
+  return n;
+}
+
+// ------------------------------------------------------------- 카드
+
+function buildCard(n) {
+  const el = document.createElement('div');
+  el.className = 'card';
+  el.innerHTML = `
+    <div class="card-head">
+      <span class="name"></span>
+      <span class="badge"></span>
+    </div>
+    <div class="row">
+      <span class="val">--</span><span class="unit">mV</span>
+      <span class="raw"></span>
+    </div>
+    <canvas></canvas>
+    <div class="led-row">
+      <span class="led-state">--</span>
+      <button data-cmd="on">ON</button>
+      <button data-cmd="off">OFF</button>
+      <button data-cmd="toggle">TOGGLE</button>
+    </div>
+    <div class="seen"></div>`;
+
+  el.querySelector('.name').textContent = n.id;
+  el.querySelectorAll('button').forEach(b => {
+    b.onclick = () => {
+      if (!client || !client.connected) return;
+      client.publish(BASE + '/' + n.id + '/led/set', b.dataset.cmd);
+    };
+  });
+  return el;
+}
+
+function render(n) {
+  const el = n.el;
+  const stale = Date.now() - n.lastSeen > OFFLINE_AFTER_MS;
+  const online = n.status === 'online' && !stale;
+
+  el.classList.toggle('offline', !online);
+
+  const badge = el.querySelector('.badge');
+  badge.textContent = online ? 'ONLINE' : 'OFFLINE';
+  badge.className = 'badge ' + (online ? 'online' : 'offline');
+
+  el.querySelector('.val').textContent = n.mv == null ? '--' : n.mv;
+  el.querySelector('.raw').textContent = n.raw == null ? '' : 'raw ' + n.raw;
+
+  const ledEl = el.querySelector('.led-state');
+  ledEl.textContent = n.led === 'on' ? 'ON' : n.led === 'off' ? 'OFF' : '--';
+  ledEl.className = 'led-state' + (n.led === 'on' ? ' on' : '');
+
+  const ago = n.lastSeen ? Math.round((Date.now() - n.lastSeen) / 1000) : null;
+  el.querySelector('.seen').textContent = ago == null ? '' : ago + '초 전 수신';
+
+  drawGraph(el.querySelector('canvas'), n.history);
+}
+
+// ------------------------------------------------------------- 그래프
+
+function drawGraph(canvas, history) {
+  // 캔버스 픽셀 크기를 CSS 크기 * DPR로 맞춰야 선이 흐려지지 않는다
+  const dpr = window.devicePixelRatio || 1;
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  if (!w || !h) return;
+  if (canvas.width !== w * dpr || canvas.height !== h * dpr) {
+    canvas.width = w * dpr; canvas.height = h * dpr;
+  }
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+
+  if (history.length < 2) return;
+
+  // 값 변화가 작아도 납작하게 보이지 않도록 최소 폭을 준다
+  let min = Math.min(...history.map(p => p.mv));
+  let max = Math.max(...history.map(p => p.mv));
+  const MIN_SPAN = 200;
+  if (max - min < MIN_SPAN) {
+    const mid = (max + min) / 2;
+    min = mid - MIN_SPAN / 2; max = mid + MIN_SPAN / 2;
+  }
+
+  const t1 = Date.now(), t0 = t1 - HISTORY_MS;
+  const x = t => ((t - t0) / (t1 - t0)) * w;
+  const y = v => h - ((v - min) / (max - min)) * (h - 6) - 3;
+
+  // 면적
+  ctx.beginPath();
+  ctx.moveTo(x(history[0].t), h);
+  history.forEach(p => ctx.lineTo(x(p.t), y(p.mv)));
+  ctx.lineTo(x(history[history.length - 1].t), h);
+  ctx.closePath();
+  ctx.fillStyle = 'rgba(77,159,255,.13)';
+  ctx.fill();
+
+  // 선
+  ctx.beginPath();
+  history.forEach((p, i) => i ? ctx.lineTo(x(p.t), y(p.mv)) : ctx.moveTo(x(p.t), y(p.mv)));
+  ctx.strokeStyle = '#4d9fff';
+  ctx.lineWidth = 1.6;
+  ctx.lineJoin = 'round';
+  ctx.stroke();
+}
+
+// ------------------------------------------------------------- 주기 갱신
+
+// 메시지가 안 와도 "N초 전"과 offline 판정은 계속 갱신되어야 한다.
+setInterval(() => nodes.forEach(render), 1000);
+
+document.getElementById('reconnect').onclick = () => connect(hostInput.value.trim());
+hostInput.addEventListener('keydown', e => {
+  if (e.key === 'Enter') connect(hostInput.value.trim());
+});
+
+connect(savedHost);
+</script>
+</body>
+</html>

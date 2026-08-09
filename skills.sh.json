@@ -1,0 +1,9 @@
+{
+  "groupings": [
+    {
+      "title": "어푸어푸 MQTT",
+      "description": "팀 전용 Mosquitto 브로커로 XIAO ESP32C6 보드를 제어하고 센서값을 읽는다. 대시보드 포함.",
+      "skills": ["apuapu-mqtt"]
+    }
+  ]
+}
