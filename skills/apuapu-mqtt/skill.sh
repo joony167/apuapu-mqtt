@@ -80,6 +80,7 @@ apuapu-mqtt - 어푸어푸 팀 브로커 ${MQTT_HOST}:${MQTT_PORT}
   ./skill.sh led [ID] on|off|toggle
   ./skill.sh sensor [ID]        그 보드의 A0 값 스트리밍
   ./skill.sh dashboard          브라우저로 대시보드 열기
+  ./skill.sh firmware           보드에 올리는 방법 (경로까지 채워서 출력)
   ./skill.sh pub TOPIC PAYLOAD  아무 토픽에나 발행 (탈출구)
 
 ID를 생략하면 저장된 이름을 씁니다. \`./skill.sh name hyunjoon\` 한 번 해두면
@@ -205,6 +206,55 @@ cmd_dashboard() {
   fi
 }
 
+cmd_firmware() {
+  local dir="${SCRIPT_DIR}/firmware/ApuapuNode"
+  [ -d "$dir" ] || die "펌웨어 폴더가 없습니다: $dir"
+
+  local disp="$dir"
+  command -v cygpath >/dev/null 2>&1 && disp="$(cygpath -w "$dir")"
+
+  local id; id="$(load_device)"
+
+  cat <<EOF
+보드 펌웨어 올리기
+==================
+스케치 폴더: ${disp}
+
+1) 설정 파일 만들기 (없으면)
+   arduino_secrets.example.h 를 arduino_secrets.h 로 복사한 뒤 채웁니다:
+
+     #define WIFI_SSID   "ICEE"
+     #define WIFI_PASS   "교실 와이파이 비밀번호"
+     #define MQTT_HOST   "${MQTT_HOST}"
+     #define MQTT_PORT   ${MQTT_PORT}
+     #define DEVICE_NAME "${id:-내이름}"
+
+   DEVICE_NAME 은 './skill.sh name' 으로 저장한 이름과 같아야 합니다.
+
+2) 라이브러리 설치 (최초 1회)
+     arduino-cli lib install PubSubClient
+
+3) 컴파일 & 업로드 (COM 포트는 장치 관리자에서 확인)
+     arduino-cli compile --fqbn esp32:esp32:XIAO_ESP32C6 "${disp}"
+     arduino-cli upload -p COM3 --fqbn esp32:esp32:XIAO_ESP32C6 "${disp}"
+
+   윈도우 사용자 이름이 한글이면 링크 에러가 납니다. 그때는 빌드 경로를
+   영문으로 지정하세요:
+     arduino-cli compile --fqbn esp32:esp32:XIAO_ESP32C6 --build-path C:\\dev\\ac_build "${disp}"
+
+4) 확인
+     ./skill.sh devices
+EOF
+
+  if [ -f "$dir/arduino_secrets.h" ]; then
+    echo
+    echo "* arduino_secrets.h 이미 있음 - 1) 은 건너뛰어도 됩니다."
+  else
+    echo
+    echo "* arduino_secrets.h 아직 없음 - 1) 부터 하세요."
+  fi
+}
+
 cmd_pub() {
   need_clients
   local topic="${1:-}" payload="${2:-}"
@@ -221,6 +271,7 @@ case "${1:-help}" in
   led)       shift; cmd_led "$@" ;;
   sensor)    shift; cmd_sensor "$@" ;;
   dashboard) shift; cmd_dashboard "$@" ;;
+  firmware)  shift; cmd_firmware "$@" ;;
   pub)       shift; cmd_pub "$@" ;;
   help|-h|--help) usage ;;
   *) usage; exit 1 ;;

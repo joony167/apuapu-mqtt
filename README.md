@@ -42,6 +42,13 @@ cd .agents/skills/apuapu-mqtt
 
 ## 보드 펌웨어 올리기
 
+스케치는 스킬과 함께 설치되므로 저장소를 따로 클론할 필요가 없다.
+`.agents/skills/apuapu-mqtt/firmware/ApuapuNode/` 에 있다.
+
+```bash
+./skill.sh firmware     # 내 경로/이름을 채워 넣은 안내를 출력
+```
+
 1. `firmware/ApuapuNode/arduino_secrets.example.h` → `arduino_secrets.h` 복사
 2. WiFi 비밀번호와 본인 `DEVICE_NAME` 채우기 (팀 안에서 유일해야 함)
 3. 업로드
@@ -90,12 +97,15 @@ export MQTT_HOST=새주소
 
 ```
 broker/     mosquitto.conf + 적용 스크립트 (담당자만)
-firmware/   XIAO ESP32C6 아두이노 스케치
-skills/apuapu-mqtt/
+skills/apuapu-mqtt/          ← npx skills add 로 통째로 설치되는 부분
   skill.sh      CLI
   SKILL.md      에이전트/사람용 문서
   web/          대시보드 (dashboard.html + mqtt.min.js)
+  firmware/     XIAO ESP32C6 아두이노 스케치
 ```
+
+펌웨어와 대시보드를 스킬 폴더 안에 둔 이유는, `npx skills add`가 `skills/<이름>/`
+아래만 설치하기 때문이다. 저장소 루트에 두면 팀원 손에 들어가지 않는다.
 
 ## 보안
 

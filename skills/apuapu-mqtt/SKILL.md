@@ -111,10 +111,16 @@ client.publish('apuapu/nodes/hyunjoon/led/set', 'on')
 
 ## 보드 펌웨어
 
-`firmware/ApuapuNode/` 를 Arduino IDE나 arduino-cli로 올린다.
+스케치는 이 스킬 폴더 안에 함께 설치된다: `firmware/ApuapuNode/`.
+경로를 채워 넣은 안내를 보려면:
+
+```bash
+./skill.sh firmware
+```
 
 1. `arduino_secrets.example.h` → `arduino_secrets.h` 로 복사
 2. WiFi 비밀번호, `MQTT_HOST`, 본인 `DEVICE_NAME` 채우기
+   (`DEVICE_NAME`은 `./skill.sh name`으로 저장한 이름과 같아야 한다)
 3. 보드 매니저에서 ESP32 코어 설치, 라이브러리에서 **PubSubClient** 설치
 4. 보드를 `XIAO_ESP32C6`로 선택하고 업로드
 
@@ -123,6 +129,13 @@ arduino-cli lib install PubSubClient
 arduino-cli compile --fqbn esp32:esp32:XIAO_ESP32C6 firmware/ApuapuNode
 arduino-cli upload -p COM3 --fqbn esp32:esp32:XIAO_ESP32C6 firmware/ApuapuNode
 ```
+
+윈도우 사용자 이름이 한글이면 ESP32 툴체인이 경로를 못 읽어 `cannot find -lriscv`
+같은 링크 에러가 난다. `--build-path C:\dev\ac_build` 처럼 영문 경로를 지정한다.
+
+`./skill.sh devices`에 내 이름이 **아예 안 보이면** 보드가 브로커에 한 번도 붙지
+못한 것이다 (붙었다 끊겼다면 유언으로 `offline`이 남는다). 시리얼 모니터
+115200으로 열어서 확인한다.
 
 ## 브로커 담당자용
 
